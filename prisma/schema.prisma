@@ -26,6 +26,7 @@ model User {
   orders    Order[]
   addresses Address[]
   wishlists Wishlist[]
+  reviews   ProductReview[]
 
   @@map("users")
 }
@@ -83,10 +84,11 @@ model Product {
   updatedAt   DateTime @updatedAt
 
   // Relations
-  category   Category   @relation(fields: [categoryId], references: [id])
+  category   Category        @relation(fields: [categoryId], references: [id])
   cartItems  CartItem[]
   orderItems OrderItem[]
   wishlists  Wishlist[]
+  reviews    ProductReview[]
 
   @@map("products")
 }
@@ -321,4 +323,24 @@ model Wishlist {
 
   @@unique([userId, productId])
   @@map("wishlists")
+}
+
+model ProductReview {
+  id        String   @id @default(cuid())
+  productId String
+  userId    String
+  rating    Int      // 1-5 stars
+  title     String?
+  comment   String?
+  verified  Boolean  @default(false) // Verified purchase
+  helpful   Int      @default(0) // Helpful votes
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, userId])
+  @@map("product_reviews")
 }
