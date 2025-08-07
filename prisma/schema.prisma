@@ -25,6 +25,7 @@ model User {
   carts     Cart[]
   orders    Order[]
   addresses Address[]
+  wishlists Wishlist[]
 
   @@map("users")
 }
@@ -82,9 +83,10 @@ model Product {
   updatedAt   DateTime @updatedAt
 
   // Relations
-  category  Category   @relation(fields: [categoryId], references: [id])
-  cartItems CartItem[]
+  category   Category   @relation(fields: [categoryId], references: [id])
+  cartItems  CartItem[]
   orderItems OrderItem[]
+  wishlists  Wishlist[]
 
   @@map("products")
 }
@@ -279,4 +281,44 @@ enum RefundStatus {
   COMPLETED
   FAILED
   CANCELLED
+}
+
+model ContactMessage {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  phone     String?
+  subject   String
+  message   String
+  category  String   @default("general") // general, order, payment, product, technical, complaint
+  status    String   @default("NEW") // NEW, IN_PROGRESS, RESOLVED, CLOSED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("contact_messages")
+}
+
+model NewsletterSubscription {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  firstName String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("newsletter_subscriptions")
+}
+
+model Wishlist {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String
+  createdAt DateTime @default(now())
+
+  // Relations
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@map("wishlists")
 }

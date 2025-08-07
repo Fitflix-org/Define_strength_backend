@@ -9,8 +9,11 @@ import cartRoutes from './routes/cart';
 import orderRoutes from './routes/orders';
 import addressRoutes from './routes/addresses';
 import paymentRoutes from './routes/payments';
+import razorpayRoutes from './routes/razorpay';
 import adminRoutes from './routes/admin';
 import privacyRoutes from './routes/privacy';
+import contactRoutes from './routes/contact';
+import wishlistRoutes from './routes/wishlist';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import { securityHeaders, securityLogger, adminRateLimit } from './middleware/security';
@@ -61,8 +64,11 @@ app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/addresses', addressRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/payments', razorpayRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/privacy', privacyRoutes);
+app.use('/api/contact', contactRoutes);
+app.use('/api/wishlist', wishlistRoutes);
 
 // Error handling middleware
 app.use(notFound);
