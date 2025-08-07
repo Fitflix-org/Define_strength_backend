@@ -2,7 +2,7 @@
 
 ## Overview
 
-This is a comprehensive e-commerce API for fitness equipment built with Node.js, Express, TypeScript, and Prisma. The API provides complete functionality for product management, user authentication, shopping cart, orders, payments, and admin operations.
+This is a comprehensive e-commerce API for fitness equipment built with Node.js, Express, TypeScript, and Prisma. The API provides complete functionality for product management, user authentication, shopping cart, orders, payments, admin operations, customer engagement features (reviews, wishlist), and customer support systems.
 
 **Base URL:** `http://localhost:3001` (Development) | `https://api.fitspaceforge.com` (Production)
 **API Documentation:** `/api-docs` (Swagger UI)
@@ -879,6 +879,338 @@ Update order status (admin only).
 }
 ```
 
+### 📞 Contact & Support (`/api/contact`)
+
+#### POST `/api/contact/send`
+Send a contact form message with automatic email notifications.
+
+**Request Body:**
+```json
+{
+  "name": "John Doe",
+  "email": "john@example.com",
+  "phone": "+1234567890",
+  "subject": "Product Inquiry",
+  "message": "I have a question about the home gym equipment.",
+  "category": "product"
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Your message has been sent successfully. We'll get back to you within 24 hours.",
+  "reference": "ABC12345"
+}
+```
+
+**Categories:** `general`, `order`, `payment`, `product`, `technical`, `complaint`
+
+#### POST `/api/contact/newsletter/subscribe`
+Subscribe to the newsletter.
+
+**Request Body:**
+```json
+{
+  "email": "user@example.com",
+  "firstName": "John"
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Successfully subscribed to our newsletter! Check your email for confirmation."
+}
+```
+
+#### POST `/api/contact/newsletter/unsubscribe`
+Unsubscribe from the newsletter.
+
+**Request Body:**
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Successfully unsubscribed from our newsletter."
+}
+```
+
+### ❤️ Wishlist (`/api/wishlist`)
+
+All wishlist endpoints require authentication.
+
+#### GET `/api/wishlist`
+Get user's wishlist with pagination.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Query Parameters:**
+- `page` (integer, default: 1)
+- `limit` (integer, default: 10, max: 50)
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "wishlist": [
+    {
+      "id": "clxy123abc",
+      "addedAt": "2024-01-01T00:00:00.000Z",
+      "product": {
+        "id": "clxy456def",
+        "name": "Adjustable Dumbbells",
+        "description": "Professional grade adjustable dumbbells",
+        "price": 299.99,
+        "salePrice": 249.99,
+        "images": ["image1.jpg", "image2.jpg"],
+        "stock": 25,
+        "category": "Strength Training",
+        "featured": true,
+        "active": true
+      }
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 5,
+    "totalPages": 1
+  }
+}
+```
+
+#### POST `/api/wishlist/add`
+Add a product to wishlist.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "productId": "clxy456def"
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Product added to wishlist successfully",
+  "wishlistItem": {
+    "id": "clxy123abc",
+    "addedAt": "2024-01-01T00:00:00.000Z",
+    "product": {
+      "id": "clxy456def",
+      "name": "Adjustable Dumbbells",
+      "price": 299.99,
+      "salePrice": 249.99,
+      "images": ["image1.jpg"],
+      "category": "Strength Training"
+    }
+  }
+}
+```
+
+#### DELETE `/api/wishlist/remove/:productId`
+Remove a product from wishlist.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Product removed from wishlist successfully"
+}
+```
+
+#### DELETE `/api/wishlist/clear`
+Clear entire wishlist.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Wishlist cleared successfully",
+  "deletedCount": 5
+}
+```
+
+#### GET `/api/wishlist/check/:productId`
+Check if a product is in the user's wishlist.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "inWishlist": true,
+  "addedAt": "2024-01-01T00:00:00.000Z"
+}
+```
+
+### ⭐ Product Reviews (`/api/reviews`)
+
+#### GET `/api/reviews/:productId`
+Get reviews for a specific product with pagination and sorting.
+
+**Query Parameters:**
+- `page` (integer, default: 1)
+- `limit` (integer, default: 10)
+- `sortBy` (string, options: `newest`, `oldest`, `rating-high`, `rating-low`, `helpful`, default: `newest`)
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "reviews": [
+      {
+        "id": "clxy789ghi",
+        "rating": 5,
+        "title": "Excellent Quality!",
+        "comment": "These dumbbells are fantastic. Great build quality and perfect for home workouts.",
+        "verified": true,
+        "helpful": 12,
+        "createdAt": "2024-01-01T00:00:00.000Z",
+        "user": {
+          "name": "John D.",
+          "firstName": "John"
+        }
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 10,
+      "total": 45,
+      "totalPages": 5
+    },
+    "summary": {
+      "averageRating": 4.3,
+      "totalReviews": 45,
+      "ratingDistribution": {
+        "5": 25,
+        "4": 12,
+        "3": 5,
+        "2": 2,
+        "1": 1
+      }
+    }
+  }
+}
+```
+
+#### POST `/api/reviews`
+Create a new product review.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "productId": "clxy456def",
+  "rating": 5,
+  "title": "Excellent Quality!",
+  "comment": "These dumbbells are fantastic. Great build quality and perfect for home workouts."
+}
+```
+
+**Response (201):**
+```json
+{
+  "success": true,
+  "message": "Review created successfully",
+  "data": {
+    "id": "clxy789ghi",
+    "rating": 5,
+    "title": "Excellent Quality!",
+    "comment": "These dumbbells are fantastic. Great build quality and perfect for home workouts.",
+    "verified": true,
+    "helpful": 0,
+    "createdAt": "2024-01-01T00:00:00.000Z",
+    "user": {
+      "name": "John D."
+    }
+  }
+}
+```
+
+**Note:** Users can only review products they have purchased. The `verified` field indicates if the review is from a verified purchase.
+
+#### PUT `/api/reviews/:reviewId`
+Update an existing review (only by the review author).
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "rating": 4,
+  "title": "Updated Review Title",
+  "comment": "Updated review comment with new insights."
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Review updated successfully",
+  "data": {
+    "id": "clxy789ghi",
+    "rating": 4,
+    "title": "Updated Review Title",
+    "comment": "Updated review comment with new insights.",
+    "verified": true,
+    "helpful": 12,
+    "createdAt": "2024-01-01T00:00:00.000Z",
+    "updatedAt": "2024-01-02T00:00:00.000Z",
+    "user": {
+      "name": "John D."
+    }
+  }
+}
+```
+
+#### DELETE `/api/reviews/:reviewId`
+Delete a review (only by the review author).
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Review deleted successfully"
+}
+```
+
+#### POST `/api/reviews/:reviewId/helpful`
+Mark a review as helpful (increases helpful count).
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "message": "Review marked as helpful",
+  "data": {
+    "helpful": 13
+  }
+}
+```
+
 ---
 
 ## Error Handling
@@ -927,6 +1259,10 @@ The API uses PostgreSQL with Prisma ORM. Key models include:
 - **Category** - Product categorization
 - **Refund** - Refund management
 - **RevenueReport** - Daily revenue analytics
+- **ContactMessage** - Customer support inquiries
+- **NewsletterSubscription** - Email marketing subscriptions
+- **Wishlist** - User product wishlist functionality
+- **ProductReview** - Product reviews and ratings system
 
 ## Environment Variables
 
@@ -965,6 +1301,42 @@ PORT=3001
 - ✅ Health checks
 - ✅ Graceful shutdown
 - ✅ Process monitoring
+- ✅ Email notifications
+- ✅ Payment webhooks
+- ✅ Customer support system
+- ✅ Product reviews & ratings
+- ✅ Wishlist functionality
+- ✅ Newsletter management
+
+### Complete Feature Set
+
+#### Core E-commerce (17 endpoints)
+- User authentication & authorization
+- Product catalog with filtering & search
+- Shopping cart management
+- Order processing & tracking
+- Address management
+- Payment processing (Razorpay)
+
+#### Customer Engagement (9 endpoints)
+- Product reviews & ratings system
+- Wishlist functionality
+- Newsletter subscription management
+
+#### Customer Support (3 endpoints)
+- Contact form with email automation
+- Support inquiry categorization
+- Admin notification system
+
+#### Admin Dashboard (6 endpoints)
+- Order management & status updates
+- Revenue analytics & reporting
+- Payment monitoring & tracking
+
+#### Security & Privacy (3 endpoints)
+- GDPR compliance features
+- Data export & deletion
+- Consent management
 
 ### Security Features
 
@@ -991,4 +1363,7 @@ For API support, contact: support@fitspaceforge.com
 
 ## Version History
 
-- **v1.0.0** - Initial release with full e-commerce functionality
+- **v1.3.0** - Added comprehensive business features: Product Reviews, Wishlist, Contact & Support, Newsletter management
+- **v1.2.0** - Enhanced payment integration with Razorpay webhooks and improved security features
+- **v1.1.0** - Added admin dashboard, analytics, and enterprise security features
+- **v1.0.0** - Initial release with core e-commerce functionality
