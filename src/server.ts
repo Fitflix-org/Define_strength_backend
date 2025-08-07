@@ -15,6 +15,7 @@ import privacyRoutes from './routes/privacy';
 import contactRoutes from './routes/contact';
 import wishlistRoutes from './routes/wishlist';
 import reviewRoutes from './routes/reviews';
+import analyticsRoutes from './routes/analytics';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import { securityHeaders, securityLogger, adminRateLimit } from './middleware/security';
@@ -71,6 +72,7 @@ app.use('/api/privacy', privacyRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // Error handling middleware
 app.use(notFound);
