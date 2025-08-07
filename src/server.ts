@@ -10,14 +10,22 @@ import orderRoutes from './routes/orders';
 import addressRoutes from './routes/addresses';
 import paymentRoutes from './routes/payments';
 import adminRoutes from './routes/admin';
+import privacyRoutes from './routes/privacy';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
+import { securityHeaders, securityLogger, adminRateLimit } from './middleware/security';
 
 // Load environment variables
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Custom security headers
+app.use(securityHeaders);
+
+// Security logging
+app.use(securityLogger);
 
 // Security middleware
 app.use(helmet());
@@ -54,6 +62,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/addresses', addressRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/privacy', privacyRoutes);
 
 // Error handling middleware
 app.use(notFound);

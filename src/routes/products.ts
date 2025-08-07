@@ -2,10 +2,173 @@ import { Router } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { z } from 'zod';
 
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Product:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *           example: "clxy123abc"
+ *         name:
+ *           type: string
+ *           example: "Adjustable Dumbbell Set"
+ *         description:
+ *           type: string
+ *           example: "High-quality adjustable dumbbells for home workouts"
+ *         price:
+ *           type: number
+ *           format: decimal
+ *           example: 299.99
+ *         salePrice:
+ *           type: number
+ *           format: decimal
+ *           example: 249.99
+ *         sku:
+ *           type: string
+ *           example: "ADJDB001"
+ *         stock:
+ *           type: integer
+ *           example: 50
+ *         images:
+ *           type: array
+ *           items:
+ *             type: string
+ *           example: ["image1.jpg", "image2.jpg"]
+ *         categoryId:
+ *           type: string
+ *           example: "clxy456def"
+ *         spaceType:
+ *           type: string
+ *           enum: [home, office, commercial]
+ *           example: "home"
+ *         featured:
+ *           type: boolean
+ *           example: true
+ *         active:
+ *           type: boolean
+ *           example: true
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *         category:
+ *           $ref: '#/components/schemas/Category'
+ *     Category:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *           example: "clxy456def"
+ *         name:
+ *           type: string
+ *           example: "Dumbbells"
+ *         description:
+ *           type: string
+ *           example: "All types of dumbbells"
+ *         slug:
+ *           type: string
+ *           example: "dumbbells"
+ *     ProductListResponse:
+ *       type: object
+ *       properties:
+ *         products:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/Product'
+ *         pagination:
+ *           type: object
+ *           properties:
+ *             page:
+ *               type: integer
+ *               example: 1
+ *             limit:
+ *               type: integer
+ *               example: 12
+ *             total:
+ *               type: integer
+ *               example: 100
+ *             pages:
+ *               type: integer
+ *               example: 9
+ * tags:
+ *   - name: Products
+ *     description: Product management endpoints
+ */
+
 const router = Router();
 const prisma = new PrismaClient();
 
 // Get all products with filtering
+/**
+ * @swagger
+ * /api/products:
+ *   get:
+ *     summary: Get all products with filtering and pagination
+ *     tags: [Products]
+ *     parameters:
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *         description: Filter by category slug
+ *         example: "dumbbells"
+ *       - in: query
+ *         name: spaceType
+ *         schema:
+ *           type: string
+ *           enum: [home, office, commercial, all]
+ *         description: Filter by space type
+ *         example: "home"
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Search in product name and description
+ *         example: "dumbbell"
+ *       - in: query
+ *         name: minPrice
+ *         schema:
+ *           type: number
+ *         description: Minimum price filter
+ *         example: 100
+ *       - in: query
+ *         name: maxPrice
+ *         schema:
+ *           type: number
+ *         description: Maximum price filter
+ *         example: 500
+ *       - in: query
+ *         name: featured
+ *         schema:
+ *           type: boolean
+ *         description: Filter featured products only
+ *         example: true
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number for pagination
+ *         example: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 12
+ *         description: Number of products per page
+ *         example: 12
+ *     responses:
+ *       200:
+ *         description: Products retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ProductListResponse'
+ *       500:
+ *         description: Internal server error
+ */
 router.get('/', async (req, res) => {
   try {
     const {

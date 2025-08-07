@@ -57,7 +57,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res) => {
     const address = await prisma.address.create({
       data: {
         ...validatedData,
-        userId
+        userId: userId!
       }
     });
 

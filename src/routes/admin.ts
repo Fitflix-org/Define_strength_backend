@@ -1,9 +1,13 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { adminAuth, AdminRequest } from '../middleware/adminAuth';
+import { adminIpWhitelist } from '../middleware/security';
 
 const router = Router();
 const prisma = new PrismaClient();
+
+// Apply IP whitelist to all admin routes
+router.use(adminIpWhitelist);
 
 // Get current admin user profile
 router.get('/profile', adminAuth, async (req: AdminRequest, res) => {
