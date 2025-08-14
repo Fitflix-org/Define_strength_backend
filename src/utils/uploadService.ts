@@ -30,13 +30,13 @@ const localStorage = multer.diskStorage({
 
 // S3 storage configuration
 const s3Storage = multerS3({
-  s3: s3,
+  s3: s3 as any, // Type assertion to fix AWS SDK version compatibility
   bucket: process.env.AWS_S3_BUCKET!,
   acl: 'public-read',
-  metadata: (req, file, cb) => {
+  metadata: (req: Request, file: Express.Multer.File, cb: (error: any, metadata?: any) => void) => {
     cb(null, { fieldName: file.fieldname });
   },
-  key: (req, file, cb) => {
+  key: (req: Request, file: Express.Multer.File, cb: (error: any, key?: string) => void) => {
     const folder = req.path.includes('products') ? 'products' : 'general';
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, `${folder}/${uniqueSuffix}-${file.originalname}`);

@@ -6,6 +6,7 @@ import {
   createRazorpayOrder,
   verifyRazorpaySignature,
   getPaymentDetails,
+  getOrderDetails,
   createRefund,
   convertToPaise,
   convertToINR,
@@ -20,7 +21,6 @@ const createOrderSchema = z.object({
 });
 
 const verifyPaymentSchema = z.object({
-  orderId: z.string().min(1, 'Order ID is required'),
   razorpay_order_id: z.string().min(1, 'Razorpay order ID is required'),
   razorpay_payment_id: z.string().min(1, 'Razorpay payment ID is required'),
   razorpay_signature: z.string().min(1, 'Razorpay signature is required'),
@@ -202,13 +202,10 @@ router.post('/create-razorpay-order', authenticateToken, async (req: AuthRequest
  *           schema:
  *             type: object
  *             required:
- *               - orderId
  *               - razorpay_order_id
  *               - razorpay_payment_id
  *               - razorpay_signature
  *             properties:
- *               orderId:
- *                 type: string
  *               razorpay_order_id:
  *                 type: string
  *               razorpay_payment_id:
@@ -229,7 +226,7 @@ router.post('/create-razorpay-order', authenticateToken, async (req: AuthRequest
  */
 router.post('/verify-payment', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
-    const { orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = 
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = 
       verifyPaymentSchema.parse(req.body);
     const userId = req.user?.id;
 
@@ -237,6 +234,25 @@ router.post('/verify-payment', authenticateToken, async (req: AuthRequest, res: 
       return res.status(401).json({
         success: false,
         message: 'User not authenticated',
+      });
+    }
+
+    // Get order details from Razorpay to extract orderId from notes
+    const orderDetailsResult = await getOrderDetails(razorpay_order_id);
+    
+    if (!orderDetailsResult.success || !orderDetailsResult.order) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid Razorpay order ID',
+      });
+    }
+
+    const orderId = String(orderDetailsResult.order.notes?.orderId);
+    
+    if (!orderId || orderId === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        message: 'Order ID not found in Razorpay order notes',
       });
     }
 
@@ -248,7 +264,7 @@ router.post('/verify-payment', authenticateToken, async (req: AuthRequest, res: 
           userId: userId,
         },
         gatewayOrderId: razorpay_order_id,
-        status: 'PENDING',
+        status: { in: ['PENDING', 'COMPLETED'] },
       },
       include: {
         order: {
@@ -305,7 +321,7 @@ router.post('/verify-payment', authenticateToken, async (req: AuthRequest, res: 
     // Update payment record
     await prisma.$transaction(async (tx) => {
       // Update payment status
-      await tx.payment.update({
+      const updatedPayment = await tx.payment.update({
         where: { id: payment.id },
         data: {
           status: 'COMPLETED',
@@ -321,6 +337,13 @@ router.post('/verify-payment', authenticateToken, async (req: AuthRequest, res: 
             ? Number(payment.amount) - convertToINR(paymentDetails.fee)
             : Number(payment.amount),
           paidAt: new Date(),
+        },
+        include: {
+          order: {
+            include: {
+              items: true,
+            },
+          },
         },
       });
 
@@ -345,7 +368,7 @@ router.post('/verify-payment', authenticateToken, async (req: AuthRequest, res: 
           gatewayFees: paymentDetails.fee ? convertToINR(paymentDetails.fee) : 0,
           totalOrders: 1,
           successfulPayments: 1,
-          totalItemsSold: payment.order.items?.length || 0,
+          totalItemsSold: updatedPayment.order.items?.length || 0,
           averageOrderValue: Number(payment.amount),
         },
         update: {
@@ -367,7 +390,7 @@ router.post('/verify-payment', authenticateToken, async (req: AuthRequest, res: 
             increment: 1,
           },
           totalItemsSold: {
-            increment: payment.order.items?.length || 0,
+            increment: updatedPayment.order.items?.length || 0,
           },
         },
       });
