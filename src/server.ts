@@ -65,7 +65,7 @@ app.use('/api/products', productRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/addresses', addressRoutes);
-app.use('/api/payments', paymentRoutes);
+// app.use('/api/payments', paymentRoutes);
 app.use('/api/payments', razorpayRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/privacy', privacyRoutes);
