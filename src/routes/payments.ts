@@ -20,7 +20,6 @@ const createPaymentSchema = z.object({
   bankName: z.string().optional(),
 });
 
-// Update payment status schema
 const updatePaymentSchema = z.object({
   status: z.enum(['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'CANCELLED']),
   gatewayPaymentId: z.string().optional(),
