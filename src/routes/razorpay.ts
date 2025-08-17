@@ -283,6 +283,14 @@ router.post('/verify-payment', authenticateToken, async (req: AuthRequest, res: 
     }
 
     // Verify signature
+    console.log('Verifying payment signature for order:', razorpay_order_id);
+    console.log('Payment data:', { 
+      razorpay_order_id, 
+      razorpay_payment_id,
+      // Don't log the full signature for security reasons
+      razorpay_signature_length: razorpay_signature.length 
+    });
+    
     const isValidSignature = verifyRazorpaySignature({
       razorpay_order_id,
       razorpay_payment_id,
@@ -290,6 +298,12 @@ router.post('/verify-payment', authenticateToken, async (req: AuthRequest, res: 
     });
 
     if (!isValidSignature) {
+      console.error('Signature verification failed for payment:', {
+        orderId,
+        razorpay_order_id,
+        razorpay_payment_id
+      });
+      
       // Update payment status to failed
       await prisma.payment.update({
         where: { id: payment.id },
@@ -305,6 +319,8 @@ router.post('/verify-payment', authenticateToken, async (req: AuthRequest, res: 
         message: 'Invalid payment signature',
       });
     }
+    
+    console.log('Signature verification successful for payment:', razorpay_payment_id);
 
     // Get payment details from Razorpay
     const paymentDetailsResult = await getPaymentDetails(razorpay_payment_id);

@@ -1,11 +1,12 @@
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
 
-// Initialize Razorpay instance
-const razorpayInstance = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID!,
-  key_secret: process.env.RAZORPAY_KEY_SECRET!,
-});
+export function getRazorpayInstance() {
+  return new Razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID!,
+    key_secret: process.env.RAZORPAY_KEY_SECRET!,
+  });
+}
 
 export interface CreateOrderOptions {
   amount: number; // Amount in paise (1 INR = 100 paise)
@@ -32,7 +33,7 @@ export const createRazorpayOrder = async (options: CreateOrderOptions) => {
       notes: options.notes || {},
     };
 
-    const order = await razorpayInstance.orders.create(orderOptions);
+    const order = await getRazorpayInstance().orders.create(orderOptions);
     return {
       success: true,
       order,
@@ -55,13 +56,29 @@ export const verifyRazorpaySignature = (paymentData: VerifyPaymentSignature): bo
 
     // Create expected signature
     const body = razorpay_order_id + '|' + razorpay_payment_id;
+    
+    // Make sure the key secret is available
+    if (!process.env.RAZORPAY_KEY_SECRET) {
+      console.error('RAZORPAY_KEY_SECRET is not defined in environment variables');
+      return false;
+    }
+    
     const expectedSignature = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET!)
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
       .update(body.toString())
       .digest('hex');
 
     // Compare signatures
-    return expectedSignature === razorpay_signature;
+    const isValid = expectedSignature === razorpay_signature;
+    
+    // Log verification details for debugging
+    console.log('Signature verification:', {
+      expected: expectedSignature,
+      received: razorpay_signature,
+      isValid: isValid
+    });
+    
+    return isValid;
   } catch (error) {
     console.error('Error verifying signature:', error);
     return false;
@@ -73,7 +90,7 @@ export const verifyRazorpaySignature = (paymentData: VerifyPaymentSignature): bo
  */
 export const getPaymentDetails = async (paymentId: string) => {
   try {
-    const payment = await razorpayInstance.payments.fetch(paymentId);
+    const payment = await getRazorpayInstance().payments.fetch(paymentId);
     return {
       success: true,
       payment,
@@ -100,7 +117,7 @@ export const createRefund = async (paymentId: string, amount?: number, notes?: R
       refundOptions.amount = amount; // Amount in paise
     }
 
-    const refund = await razorpayInstance.payments.refund(paymentId, refundOptions);
+    const refund = await getRazorpayInstance().payments.refund(paymentId, refundOptions);
     return {
       success: true,
       refund,
@@ -119,7 +136,7 @@ export const createRefund = async (paymentId: string, amount?: number, notes?: R
  */
 export const getAllOrders = async (options: { from?: number; to?: number; count?: number; skip?: number } = {}) => {
   try {
-    const orders = await razorpayInstance.orders.all(options);
+    const orders = await getRazorpayInstance().orders.all(options);
     return {
       success: true,
       orders,
@@ -138,7 +155,7 @@ export const getAllOrders = async (options: { from?: number; to?: number; count?
  */
 export const getOrderDetails = async (orderId: string) => {
   try {
-    const order = await razorpayInstance.orders.fetch(orderId);
+    const order = await getRazorpayInstance().orders.fetch(orderId);
     return {
       success: true,
       order,
@@ -165,5 +182,3 @@ export const convertToPaise = (amountInINR: number): number => {
 export const convertToINR = (amountInPaise: number): number => {
   return amountInPaise / 100;
 };
-
-export default razorpayInstance;

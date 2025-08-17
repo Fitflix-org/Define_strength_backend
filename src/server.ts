@@ -1,8 +1,11 @@
+// ...existing code...
+dotenv.config();
+import dotenv from 'dotenv';
+dotenv.config();
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import dotenv from 'dotenv';
 import authRoutes from './routes/auth';
 import productRoutes from './routes/products';
 import cartRoutes from './routes/cart';
@@ -21,7 +24,6 @@ import { notFound } from './middleware/notFound';
 import { securityHeaders, securityLogger, adminRateLimit } from './middleware/security';
 
 // Load environment variables
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;

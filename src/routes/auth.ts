@@ -103,7 +103,7 @@ import {
  *     description: User authentication endpoints
  */
 
-const router = Router();
+const  router = Router();
 const prisma = new PrismaClient();
 
 // Validation schemas

@@ -12,13 +12,26 @@ export interface RefreshTokenPayload {
   tokenId: string;
 }
 
-const JWT_SECRET = process.env.JWT_SECRET!;
-const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || JWT_SECRET + '_refresh';
+function getJwtSecret() {
+  if (!process.env.JWT_SECRET) {
+    throw new Error('JWT_SECRET environment variable is not set');
+  }
+  return process.env.JWT_SECRET;
+}
+
+function getRefreshSecret() {
+  if (process.env.JWT_REFRESH_SECRET) {
+    return process.env.JWT_REFRESH_SECRET;
+  }
+  return getJwtSecret() + '_refresh';
+}
 
 // Store refresh tokens in memory (use Redis in production)
 const refreshTokens = new Set<string>();
 
 export const generateTokens = (payload: TokenPayload) => {
+  const JWT_SECRET = getJwtSecret();
+  const REFRESH_SECRET = getRefreshSecret();
   // Short-lived access token (15 minutes)
   const accessToken = jwt.sign(payload, JWT_SECRET, {
     expiresIn: '15m',
@@ -45,7 +58,7 @@ export const generateTokens = (payload: TokenPayload) => {
 };
 
 export const verifyAccessToken = (token: string): TokenPayload => {
-  return jwt.verify(token, JWT_SECRET, {
+  return jwt.verify(token, getJwtSecret(), {
     issuer: 'fitspace-api',
     audience: 'fitspace-client'
   }) as TokenPayload;
@@ -57,7 +70,7 @@ export const verifyRefreshToken = (token: string): RefreshTokenPayload => {
     throw new Error('Invalid refresh token');
   }
 
-  return jwt.verify(token, REFRESH_SECRET, {
+  return jwt.verify(token, getRefreshSecret(), {
     issuer: 'fitspace-api',
     audience: 'fitspace-client'
   }) as RefreshTokenPayload;
@@ -85,7 +98,7 @@ export const revokeAllUserTokens = (userId: string): void => {
 export const cleanupExpiredTokens = (): void => {
   for (const token of refreshTokens) {
     try {
-      jwt.verify(token, REFRESH_SECRET);
+      jwt.verify(token, getRefreshSecret());
     } catch (error) {
       // Token is expired or invalid, remove it
       refreshTokens.delete(token);
