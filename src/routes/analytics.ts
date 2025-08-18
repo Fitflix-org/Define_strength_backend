@@ -1,16 +1,16 @@
 import { Router } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import prisma from '../utils/prisma';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 // Date range schema for analytics queries
 const dateRangeSchema = z.object({
   startDate: z.string().optional(),
   endDate: z.string().optional(),
-  period: z.enum(['day', 'week', 'month', 'year']).optional().default('month')
+  // Accept friendly ranges like "7d","30d","90d","1y","all" in addition to day/week/month/year
+  period: z.string().optional().default('month')
 });
 
 // Get revenue overview
@@ -23,10 +23,26 @@ router.get('/overview', authenticateToken, async (req: AuthRequest, res) => {
     const start = startDate ? new Date(startDate) : (() => {
       const date = new Date();
       switch (period) {
-        case 'day': date.setDate(date.getDate() - 1); break;
-        case 'week': date.setDate(date.getDate() - 7); break;
-        case 'month': date.setMonth(date.getMonth() - 1); break;
-        case 'year': date.setFullYear(date.getFullYear() - 1); break;
+        case 'day':
+        case '1d':
+        case '24h':
+          date.setDate(date.getDate() - 1); break;
+        case 'week':
+        case '7d':
+          date.setDate(date.getDate() - 7); break;
+        case 'month':
+        case '30d':
+          date.setMonth(date.getMonth() - 1); break;
+        case '90d':
+          date.setMonth(date.getMonth() - 3); break;
+        case 'year':
+        case '1y':
+          date.setFullYear(date.getFullYear() - 1); break;
+        case 'all':
+          return new Date(0);
+        default:
+          // Fallback to 30d
+          date.setMonth(date.getMonth() - 1); break;
       }
       return date;
     })();
@@ -71,14 +87,71 @@ router.get('/overview', authenticateToken, async (req: AuthRequest, res) => {
       ? (totals.successfulPayments / (totals.successfulPayments + totals.failedPayments)) * 100 
       : 0;
 
-    res.json({
-      period: { start, end },
-      totals: {
-        ...totals,
-        averageOrderValue,
-        conversionRate,
+    // Payment method breakdown (match frontend shape)
+    const paymentMethodsAgg = await prisma.payment.groupBy({
+      by: ['paymentMethod'],
+      where: {
+        createdAt: { gte: start, lte: end },
+        status: 'COMPLETED'
       },
-      dailyReports: revenueReports
+      _sum: { amount: true },
+      _count: { id: true }
+    });
+
+    const paymentMethods = paymentMethodsAgg.map(pm => ({
+      method: pm.paymentMethod,
+      amount: pm._sum.amount || 0,
+      count: pm._count.id
+    }));
+
+    // Top products (match frontend shape)
+    const topProductsAgg = await prisma.orderItem.groupBy({
+      by: ['productId'],
+      where: {
+        order: {
+          createdAt: { gte: start, lte: end },
+          status: { not: 'CANCELLED' }
+        }
+      },
+      _sum: {
+        quantity: true,
+        price: true
+      },
+      _count: { id: true },
+      orderBy: {
+        _sum: { quantity: 'desc' }
+      },
+      take: 10
+    });
+
+    const topProducts = (await Promise.all(
+      topProductsAgg.map(async (tp) => {
+        const product = await prisma.product.findUnique({
+          where: { id: tp.productId },
+          select: { id: true, name: true, images: true }
+        });
+        if (!product) return null;
+        return {
+          product,
+          quantity: tp._sum.quantity || 0,
+          revenue: tp._sum.price || 0,
+        };
+      })
+    )).filter(Boolean);
+
+    res.json({
+      success: true,
+      data: {
+        period: { start, end },
+        totals: {
+          ...totals,
+          averageOrderValue,
+          conversionRate,
+        },
+        dailyReports: revenueReports,
+        paymentMethods,
+        topProducts
+      }
     });
   } catch (error) {
     console.error('Revenue overview error:', error);
@@ -132,26 +205,29 @@ router.get('/payments', authenticateToken, async (req: AuthRequest, res) => {
     });
 
     res.json({
-      period: { start, end },
-      paymentMethods: paymentMethods.map(pm => ({
-        method: pm.paymentMethod,
-        totalAmount: pm._sum.amount || 0,
-        transactionCount: pm._count.id,
-        averageAmount: pm._count.id > 0 ? (parseFloat(pm._sum.amount?.toString() || '0') / pm._count.id) : 0
-      })),
-      paymentStatuses: paymentStatuses.map(ps => ({
-        status: ps.status,
-        totalAmount: ps._sum.amount || 0,
-        transactionCount: ps._count.id
-      })),
-      gatewayAnalysis: gatewayAnalysis.map(ga => ({
-        provider: ga.gatewayProvider,
-        totalAmount: ga._sum.amount || 0,
-        totalFees: ga._sum.gatewayFee || 0,
-        netAmount: ga._sum.netAmount || 0,
-        transactionCount: ga._count.id,
-        feePercentage: ga._sum.amount ? (parseFloat(ga._sum.gatewayFee?.toString() || '0') / parseFloat(ga._sum.amount.toString())) * 100 : 0
-      }))
+      success: true,
+      data: {
+        period: { start, end },
+        paymentMethods: paymentMethods.map(pm => ({
+          method: pm.paymentMethod,
+          totalAmount: pm._sum.amount || 0,
+          transactionCount: pm._count.id,
+          averageAmount: pm._count.id > 0 ? (parseFloat(pm._sum.amount?.toString() || '0') / pm._count.id) : 0
+        })),
+        paymentStatuses: paymentStatuses.map(ps => ({
+          status: ps.status,
+          totalAmount: ps._sum.amount || 0,
+          transactionCount: ps._count.id
+        })),
+        gatewayAnalysis: gatewayAnalysis.map(ga => ({
+          provider: ga.gatewayProvider,
+          totalAmount: ga._sum.amount || 0,
+          totalFees: ga._sum.gatewayFee || 0,
+          netAmount: ga._sum.netAmount || 0,
+          transactionCount: ga._count.id,
+          feePercentage: ga._sum.amount ? (parseFloat(ga._sum.gatewayFee?.toString() || '0') / parseFloat(ga._sum.amount.toString())) * 100 : 0
+        }))
+      }
     });
   } catch (error) {
     console.error('Payment analytics error:', error);
@@ -205,8 +281,11 @@ router.get('/products', authenticateToken, async (req: AuthRequest, res) => {
     );
 
     res.json({
-      period: { start, end },
-      topProducts: productDetails.filter(item => item.product !== null)
+      success: true,
+      data: {
+        period: { start, end },
+        topProducts: productDetails.filter(item => item.product !== null)
+      }
     });
   } catch (error) {
     console.error('Product analytics error:', error);
@@ -255,21 +334,24 @@ router.get('/refunds', authenticateToken, async (req: AuthRequest, res) => {
     });
 
     res.json({
-      period: { start, end },
-      summary: {
-        totalRefundAmount: refundSummary._sum.amount || 0,
-        totalRefundCount: refundSummary._count.id || 0
-      },
-      refundReasons: refundReasons.map(rr => ({
-        reason: rr.reason,
-        amount: rr._sum.amount || 0,
-        count: rr._count.id
-      })),
-      refundStatuses: refundStatuses.map(rs => ({
-        status: rs.status,
-        amount: rs._sum.amount || 0,
-        count: rs._count.id
-      }))
+      success: true,
+      data: {
+        period: { start, end },
+        summary: {
+          totalRefundAmount: refundSummary._sum.amount || 0,
+          totalRefundCount: refundSummary._count.id || 0
+        },
+        refundReasons: refundReasons.map(rr => ({
+          reason: rr.reason,
+          amount: rr._sum.amount || 0,
+          count: rr._count.id
+        })),
+        refundStatuses: refundStatuses.map(rs => ({
+          status: rs.status,
+          amount: rs._sum.amount || 0,
+          count: rs._count.id
+        }))
+      }
     });
   } catch (error) {
     console.error('Refund analytics error:', error);

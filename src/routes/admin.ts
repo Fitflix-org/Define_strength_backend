@@ -1,10 +1,9 @@
 import { Router } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { adminAuth, AdminRequest } from '../middleware/adminAuth';
 import { adminIpWhitelist } from '../middleware/security';
+import prisma from '../utils/prisma';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 // Apply IP whitelist to all admin routes
 router.use(adminIpWhitelist);
@@ -86,7 +85,9 @@ router.get('/dashboard', adminAuth, async (req: AdminRequest, res) => {
     });
 
     res.json({
-      overview: {
+      success: true,
+      data: {
+        overview: {
         totalUsers,
         totalOrders,
         totalProducts,
@@ -108,6 +109,7 @@ router.get('/dashboard', adminAuth, async (req: AdminRequest, res) => {
         date: day.createdAt.toISOString().split('T')[0],
         revenue: day._sum.amount || 0
       }))
+      }
     });
   } catch (error) {
     console.error('Admin dashboard error:', error);
@@ -205,33 +207,311 @@ router.get('/orders', adminAuth, async (req: AdminRequest, res) => {
 router.patch('/orders/:orderId/status', adminAuth, async (req: AdminRequest, res) => {
   try {
     const { orderId } = req.params;
-    const { status } = req.body;
+    const { status, trackingNumber, notes } = req.body;
 
     const validStatuses = ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
     }
 
+    const updateData: any = { status };
+    if (trackingNumber !== undefined) updateData.trackingNumber = trackingNumber;
+    if (notes !== undefined) updateData.notes = notes;
+
     const order = await prisma.order.update({
       where: { id: orderId },
-      data: { status },
+      data: updateData,
       include: {
         user: {
           select: { firstName: true, lastName: true, email: true }
+        },
+        items: {
+          include: {
+            product: {
+              select: { name: true, images: true, price: true }
+            }
+          }
+        },
+        payments: {
+          select: { status: true, amount: true, paymentMethod: true }
         }
       }
     });
 
     res.json({
+      success: true,
       message: 'Order status updated successfully',
-      order: {
-        id: order.id,
-        status: order.status,
-        customer: `${order.user.firstName || ''} ${order.user.lastName || ''}`.trim() || order.user.email
-      }
+      data: order
     });
   } catch (error) {
     console.error('Update order status error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Retry payment for an order
+router.post('/orders/:orderId/retry-payment', adminAuth, async (req: AdminRequest, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        payments: true,
+        user: true
+      }
+    });
+
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    const lastPayment = order.payments[order.payments.length - 1];
+    if (lastPayment && lastPayment.status === 'COMPLETED') {
+      return res.status(400).json({ error: 'Payment already completed' });
+    }
+
+    // Create a new payment attempt
+    const newPayment = await prisma.payment.create({
+      data: {
+        orderId: order.id,
+        userId: order.userId,
+        amount: order.total,
+        currency: 'INR',
+        status: 'PENDING',
+        paymentMethod: lastPayment?.paymentMethod || 'CARD',
+        gatewayFee: 0,
+        netAmount: order.total,
+        metadata: {
+          retryAttempt: true,
+          originalPaymentId: lastPayment?.id
+        }
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Payment retry initiated successfully',
+      data: {
+        paymentId: newPayment.id,
+        orderId: order.id,
+        amount: order.total
+      }
+    });
+  } catch (error) {
+    console.error('Retry payment error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Bulk update order status
+router.patch('/orders/bulk-status', adminAuth, async (req: AdminRequest, res) => {
+  try {
+    const { orderIds, status } = req.body;
+
+    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(400).json({ error: 'Invalid order IDs' });
+    }
+
+    const validStatuses = ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    const result = await prisma.order.updateMany({
+      where: {
+        id: { in: orderIds }
+      },
+      data: { status }
+    });
+
+    res.json({
+      success: true,
+      message: `${result.count} orders updated successfully`,
+      data: {
+        updatedCount: result.count,
+        status
+      }
+    });
+  } catch (error) {
+    console.error('Bulk update orders error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Export orders as CSV
+router.get('/orders/export/csv', adminAuth, async (req: AdminRequest, res) => {
+  try {
+    const { status, search, dateFrom, dateTo } = req.query;
+
+    const where: any = {};
+    
+    if (status && status !== 'all') {
+      where.status = status;
+    }
+
+    if (search) {
+      where.OR = [
+        { id: { contains: search as string, mode: 'insensitive' } },
+        { user: { email: { contains: search as string, mode: 'insensitive' } } },
+        { user: { firstName: { contains: search as string, mode: 'insensitive' } } },
+        { user: { lastName: { contains: search as string, mode: 'insensitive' } } }
+      ];
+    }
+
+    if (dateFrom || dateTo) {
+      where.createdAt = {};
+      if (dateFrom) where.createdAt.gte = new Date(dateFrom as string);
+      if (dateTo) where.createdAt.lte = new Date(dateTo as string);
+    }
+
+    const orders = await prisma.order.findMany({
+      where,
+      include: {
+        user: {
+          select: { firstName: true, lastName: true, email: true }
+        },
+        items: {
+          include: {
+            product: {
+              select: { name: true, price: true }
+            }
+          }
+        },
+        payments: {
+          select: { status: true, amount: true, paymentMethod: true }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    // Generate CSV content
+    const csvHeaders = [
+      'Order ID',
+      'Customer Name',
+      'Customer Email',
+      'Status',
+      'Total Amount',
+      'Payment Status',
+      'Payment Method',
+      'Items',
+      'Created Date',
+      'Tracking Number',
+      'Notes'
+    ];
+
+    const csvRows = orders.map(order => [
+      order.id,
+      `${order.user.firstName || ''} ${order.user.lastName || ''}`.trim() || 'N/A',
+      order.user.email,
+      order.status,
+      order.total.toString(),
+      order.payments[0]?.status || 'N/A',
+      order.payments[0]?.paymentMethod || 'N/A',
+      order.items.map(item => `${item.product.name} (${item.quantity})`).join('; '),
+      order.createdAt.toISOString().split('T')[0],
+      order.trackingNumber || 'N/A',
+      order.notes || 'N/A'
+    ]);
+
+    const csvContent = [csvHeaders, ...csvRows]
+      .map(row => row.map(field => `"${field}"`).join(','))
+      .join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="orders-${new Date().toISOString().split('T')[0]}.csv"`);
+    res.send(csvContent);
+  } catch (error) {
+    console.error('Export orders CSV error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Export orders as Excel
+router.get('/orders/export/excel', adminAuth, async (req: AdminRequest, res) => {
+  try {
+    const { status, search, dateFrom, dateTo } = req.query;
+
+    const where: any = {};
+    
+    if (status && status !== 'all') {
+      where.status = status;
+    }
+
+    if (search) {
+      where.OR = [
+        { id: { contains: search as string, mode: 'insensitive' } },
+        { user: { email: { contains: search as string, mode: 'insensitive' } } },
+        { user: { firstName: { contains: search as string, mode: 'insensitive' } } },
+        { user: { lastName: { contains: search as string, mode: 'insensitive' } } }
+      ];
+    }
+
+    if (dateFrom || dateTo) {
+      where.createdAt = {};
+      if (dateFrom) where.createdAt.gte = new Date(dateFrom as string);
+      if (dateTo) where.createdAt.lte = new Date(dateTo as string);
+    }
+
+    const orders = await prisma.order.findMany({
+      where,
+      include: {
+        user: {
+          select: { firstName: true, lastName: true, email: true }
+        },
+        items: {
+          include: {
+            product: {
+              select: { name: true, price: true }
+            }
+          }
+        },
+        payments: {
+          select: { status: true, amount: true, paymentMethod: true }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    // For now, return CSV format with Excel MIME type
+    // In production, you might want to use a library like 'exceljs' for proper Excel format
+    const csvHeaders = [
+      'Order ID',
+      'Customer Name',
+      'Customer Email',
+      'Status',
+      'Total Amount',
+      'Payment Status',
+      'Payment Method',
+      'Items',
+      'Created Date',
+      'Tracking Number',
+      'Notes'
+    ];
+
+    const csvRows = orders.map(order => [
+      order.id,
+      `${order.user.firstName || ''} ${order.user.lastName || ''}`.trim() || 'N/A',
+      order.user.email,
+      order.status,
+      order.total.toString(),
+      order.payments[0]?.status || 'N/A',
+      order.payments[0]?.paymentMethod || 'N/A',
+      order.items.map(item => `${item.product.name} (${item.quantity})`).join('; '),
+      order.createdAt.toISOString().split('T')[0],
+      order.trackingNumber || 'N/A',
+      order.notes || 'N/A'
+    ]);
+
+    const csvContent = [csvHeaders, ...csvRows]
+      .map(row => row.map(field => `"${field}"`).join(','))
+      .join('\n');
+
+    res.setHeader('Content-Type', 'application/vnd.ms-excel');
+    res.setHeader('Content-Disposition', `attachment; filename="orders-${new Date().toISOString().split('T')[0]}.xlsx"`);
+    res.send(csvContent);
+  } catch (error) {
+    console.error('Export orders Excel error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -417,6 +697,289 @@ router.get('/payments', adminAuth, async (req: AdminRequest, res) => {
     });
   } catch (error) {
     console.error('Admin payments error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Contact Messages Management
+router.get('/contact-messages', adminAuth, async (req: AdminRequest, res) => {
+  try {
+    const { 
+      page = 1, 
+      limit = 20, 
+      status, 
+      category, 
+      priority, 
+      search,
+      assignedTo
+    } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+
+    const where: any = {};
+    
+    if (status && status !== 'all') {
+      where.status = status;
+    }
+    
+    if (category && category !== 'all') {
+      where.category = category;
+    }
+    
+    if (priority && priority !== 'all') {
+      where.priority = priority;
+    }
+    
+    if (assignedTo && assignedTo !== 'all') {
+      where.assignedTo = assignedTo;
+    }
+
+    if (search) {
+      where.OR = [
+        { name: { contains: search as string, mode: 'insensitive' } },
+        { email: { contains: search as string, mode: 'insensitive' } },
+        { subject: { contains: search as string, mode: 'insensitive' } },
+        { message: { contains: search as string, mode: 'insensitive' } }
+      ];
+    }
+
+    const [messages, totalCount] = await Promise.all([
+      prisma.contactMessage.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' },
+        include: {
+          replies: {
+            orderBy: { createdAt: 'asc' }
+          }
+        }
+      }),
+      prisma.contactMessage.count({ where })
+    ]);
+
+    res.json({
+      success: true,
+      data: messages,
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total: totalCount,
+        totalPages: Math.ceil(totalCount / Number(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Get contact messages error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update contact message status
+router.patch('/contact-messages/:messageId/status', adminAuth, async (req: AdminRequest, res) => {
+  try {
+    const { messageId } = req.params;
+    const { status } = req.body;
+
+    const validStatuses = ['NEW', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    const message = await prisma.contactMessage.update({
+      where: { id: messageId },
+      data: { status },
+      include: {
+        replies: {
+          orderBy: { createdAt: 'asc' }
+        }
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Contact message status updated successfully',
+      data: message
+    });
+  } catch (error) {
+    console.error('Update contact message status error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update contact message priority
+router.patch('/contact-messages/:messageId/priority', adminAuth, async (req: AdminRequest, res) => {
+  try {
+    const { messageId } = req.params;
+    const { priority } = req.body;
+
+    const validPriorities = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'];
+    if (!validPriorities.includes(priority)) {
+      return res.status(400).json({ error: 'Invalid priority' });
+    }
+
+    const message = await prisma.contactMessage.update({
+      where: { id: messageId },
+      data: { priority }
+    });
+
+    res.json({
+      success: true,
+      message: 'Contact message priority updated successfully',
+      data: message
+    });
+  } catch (error) {
+    console.error('Update contact message priority error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Assign contact message
+router.patch('/contact-messages/:messageId/assign', adminAuth, async (req: AdminRequest, res) => {
+  try {
+    const { messageId } = req.params;
+    const { assignedTo } = req.body;
+
+    const message = await prisma.contactMessage.update({
+      where: { id: messageId },
+      data: { assignedTo }
+    });
+
+    res.json({
+      success: true,
+      message: 'Contact message assigned successfully',
+      data: message
+    });
+  } catch (error) {
+    console.error('Assign contact message error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Add reply to contact message
+router.post('/contact-messages/:messageId/reply', adminAuth, async (req: AdminRequest, res) => {
+  try {
+    const { messageId } = req.params;
+    const { message: replyMessage } = req.body;
+
+    if (!replyMessage || replyMessage.trim().length === 0) {
+      return res.status(400).json({ error: 'Reply message is required' });
+    }
+
+    // Get admin user details
+    const admin = await prisma.user.findUnique({
+      where: { id: req.userId! },
+      select: { firstName: true, lastName: true, email: true }
+    });
+
+    const adminName = admin ? 
+      `${admin.firstName || ''} ${admin.lastName || ''}`.trim() || admin.email :
+      'Admin';
+
+    const reply = await prisma.contactReply.create({
+      data: {
+        contactMessageId: messageId,
+        adminId: req.userId!,
+        adminName,
+        message: replyMessage
+      }
+    });
+
+    // Update message status to in-progress if it's still new
+    await prisma.contactMessage.update({
+      where: { id: messageId },
+      data: {
+        status: 'IN_PROGRESS'
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Reply added successfully',
+      data: reply
+    });
+  } catch (error) {
+    console.error('Add contact reply error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Export contact messages as CSV
+router.get('/contact-messages/export/csv', adminAuth, async (req: AdminRequest, res) => {
+  try {
+    const { status, category, priority, search, dateFrom, dateTo } = req.query;
+
+    const where: any = {};
+    
+    if (status && status !== 'all') {
+      where.status = status;
+    }
+    
+    if (category && category !== 'all') {
+      where.category = category;
+    }
+    
+    if (priority && priority !== 'all') {
+      where.priority = priority;
+    }
+
+    if (search) {
+      where.OR = [
+        { name: { contains: search as string, mode: 'insensitive' } },
+        { email: { contains: search as string, mode: 'insensitive' } },
+        { subject: { contains: search as string, mode: 'insensitive' } }
+      ];
+    }
+
+    if (dateFrom || dateTo) {
+      where.createdAt = {};
+      if (dateFrom) where.createdAt.gte = new Date(dateFrom as string);
+      if (dateTo) where.createdAt.lte = new Date(dateTo as string);
+    }
+
+    const messages = await prisma.contactMessage.findMany({
+      where,
+      orderBy: { createdAt: 'desc' }
+    });
+
+    // Generate CSV content
+    const csvHeaders = [
+      'Message ID',
+      'Name',
+      'Email',
+      'Phone',
+      'Category',
+      'Priority',
+      'Subject',
+      'Message',
+      'Status',
+      'Assigned To',
+      'Google Sheets Ref',
+      'Created Date'
+    ];
+
+    const csvRows = messages.map(message => [
+      message.id,
+      message.name,
+      message.email,
+      message.phone || 'N/A',
+      message.category,
+      message.priority || 'MEDIUM',
+      message.subject,
+      message.message.substring(0, 100) + (message.message.length > 100 ? '...' : ''),
+      message.status,
+      message.assignedTo || 'Unassigned',
+      message.googleSheetsRef || 'N/A',
+      message.createdAt.toISOString().split('T')[0]
+    ]);
+
+    const csvContent = [csvHeaders, ...csvRows]
+      .map(row => row.map(field => `"${field}"`).join(','))
+      .join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="contact-messages-${new Date().toISOString().split('T')[0]}.csv"`);
+    res.send(csvContent);
+  } catch (error) {
+    console.error('Export contact messages CSV error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

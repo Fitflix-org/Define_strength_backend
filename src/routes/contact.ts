@@ -1,10 +1,10 @@
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
-import { PrismaClient } from '@prisma/client';
 import { sendEmail } from '../utils/emailService';
+import prisma from '../utils/prisma';
+import { appendToSheet } from '../utils/googleSheets';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // Validation schemas
 const contactSchema = z.object({
@@ -19,6 +19,15 @@ const contactSchema = z.object({
 const newsletterSchema = z.object({
   email: z.string().email('Valid email is required'),
   firstName: z.string().optional(),
+});
+
+// Callback request schema
+const callbackSchema = z.object({
+  name: z.string().min(2),
+  phone: z.string().min(8),
+  email: z.string().email().optional(),
+  preferredTime: z.string().optional(),
+  message: z.string().optional(),
 });
 
 /**
@@ -74,8 +83,40 @@ router.post('/send', async (req: Request, res: Response) => {
         message,
         category,
         status: 'NEW',
+        priority: 'MEDIUM',
       },
     });
+
+    // Save to Google Sheets for tracking
+    let googleSheetsRef = null;
+    try {
+      if (process.env.GOOGLE_SHEETS_ENABLED === 'true') {
+        const sheetData = [
+          new Date().toISOString(),
+          contactMessage.id,
+          name,
+          email,
+          phone || '',
+          category,
+          subject,
+          message.substring(0, 200) + (message.length > 200 ? '...' : ''),
+          'NEW',
+          'MEDIUM'
+        ];
+        
+        const response = await appendToSheet('Contact Messages', sheetData);
+        googleSheetsRef = `Sheet_Row_${response?.spreadsheetId || 'unknown'}_${Date.now()}`;
+        
+        // Update the contact message with Google Sheets reference
+        await prisma.contactMessage.update({
+          where: { id: contactMessage.id },
+          data: { googleSheetsRef }
+        });
+      }
+    } catch (sheetError) {
+      console.error('Google Sheets integration error:', sheetError);
+      // Continue without failing the main flow
+    }
 
     // Send email to admin
     const adminEmail = process.env.ADMIN_EMAIL || 'admin@definestrength.com';
@@ -187,6 +228,28 @@ router.post('/send', async (req: Request, res: Response) => {
       html: userHtml,
     });
 
+    // Append to Google Sheet if configured
+    if (process.env.GOOGLE_SHEETS_CONTACT_SPREADSHEET_ID) {
+      try {
+        await appendToSheet({
+          spreadsheetId: process.env.GOOGLE_SHEETS_CONTACT_SPREADSHEET_ID,
+          range: process.env.GOOGLE_SHEETS_CONTACT_RANGE || 'Sheet1!A1',
+          values: [[
+            new Date().toISOString(),
+            contactMessage.id,
+            name,
+            email,
+            phone || '',
+            subject,
+            category,
+            message,
+          ]],
+        });
+      } catch (e) {
+        console.error('Failed to append contact to Google Sheet:', e);
+      }
+    }
+
     res.status(200).json({
       success: true,
       message: 'Your message has been sent successfully. We\'ll get back to you within 24 hours.',
@@ -210,6 +273,99 @@ router.post('/send', async (req: Request, res: Response) => {
       success: false,
       message: 'Internal server error. Please try again.',
     });
+  }
+});
+
+// Check if a recent callback exists (last 48h) for same phone or email
+router.get('/callback/check', async (req: Request, res: Response) => {
+  try {
+    const { phone, email } = req.query as { phone?: string; email?: string };
+    if (!phone && !email) {
+      return res.status(400).json({ success: false, message: 'Provide phone or email' });
+    }
+    const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    const existing = await prisma.contactMessage.findFirst({
+      where: {
+        subject: 'Callback Request',
+        createdAt: { gte: since },
+        OR: [
+          phone ? { phone } : undefined,
+          email ? { email } : undefined,
+        ].filter(Boolean) as any,
+        status: { in: ['NEW', 'IN_PROGRESS'] },
+      }
+    });
+    if (!existing) return res.json({ exists: false });
+    return res.json({ exists: true, reference: existing.id.slice(-8), createdAt: existing.createdAt });
+  } catch (e) {
+    console.error('Callback check error:', e);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// Simple callback request that also logs to Google Sheets with dedupe
+router.post('/callback', async (req: Request, res: Response) => {
+  try {
+    const { name, phone, email, preferredTime, message } = callbackSchema.parse(req.body);
+
+    // Dedupe within last 48h for same phone/email and open status
+    const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    const dup = await prisma.contactMessage.findFirst({
+      where: {
+        subject: 'Callback Request',
+        createdAt: { gte: since },
+        OR: [
+          { phone },
+          email ? { email } : undefined,
+        ].filter(Boolean) as any,
+        status: { in: ['NEW', 'IN_PROGRESS'] },
+      }
+    });
+    if (dup) {
+      return res.status(409).json({ success: false, message: 'A callback request already exists recently', reference: dup.id.slice(-8) });
+    }
+
+    // Store as a contact message with a standardized subject
+    const contactMessage = await prisma.contactMessage.create({
+      data: {
+        name,
+        email: email || 'n/a',
+        phone,
+        subject: 'Callback Request',
+        message: message || 'User requested a callback',
+        category: 'general',
+        status: 'NEW',
+      },
+    });
+
+    // Append to Google Sheet if configured
+    if (process.env.GOOGLE_SHEETS_CALLBACK_SPREADSHEET_ID) {
+      try {
+        await appendToSheet({
+          spreadsheetId: process.env.GOOGLE_SHEETS_CALLBACK_SPREADSHEET_ID,
+          range: process.env.GOOGLE_SHEETS_CALLBACK_RANGE || 'Sheet1!A1',
+          values: [[
+            new Date().toISOString(),
+            contactMessage.id,
+            name,
+            phone,
+            email || '',
+            preferredTime || '',
+            message || '',
+          ]],
+        });
+      } catch (e) {
+        console.error('Failed to append callback to Google Sheet:', e);
+      }
+    }
+
+    res.json({ success: true, reference: contactMessage.id.slice(-8) });
+  } catch (error) {
+    console.error('Callback form error:', error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ success: false, message: 'Invalid form data', errors: error.errors });
+    }
+    res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
 

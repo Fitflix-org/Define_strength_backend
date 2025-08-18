@@ -172,13 +172,9 @@ export const getOrderDetails = async (orderId: string) => {
 /**
  * Convert amount from INR to paise
  */
-export const convertToPaise = (amountInINR: number): number => {
-  return Math.round(amountInINR * 100);
-};
+export const convertToPaise = (amountInINR: number): number => Math.round(amountInINR * 100);
 
 /**
  * Convert amount from paise to INR
  */
-export const convertToINR = (amountInPaise: number): number => {
-  return amountInPaise / 100;
-};
+export const convertToINR = (amountInPaise: number): number => amountInPaise / 100;

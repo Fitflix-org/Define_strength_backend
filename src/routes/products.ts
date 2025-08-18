@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { PrismaClient, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
+import prisma from '../utils/prisma';
 
 /**
  * @swagger
@@ -98,7 +99,6 @@ import { z } from 'zod';
  */
 
 const router = Router();
-const prisma = new PrismaClient();
 
 // Get all products with filtering
 /**

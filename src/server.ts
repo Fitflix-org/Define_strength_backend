@@ -1,7 +1,6 @@
-// ...existing code...
-dotenv.config();
 import dotenv from 'dotenv';
 dotenv.config();
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -11,17 +10,18 @@ import productRoutes from './routes/products';
 import cartRoutes from './routes/cart';
 import orderRoutes from './routes/orders';
 import addressRoutes from './routes/addresses';
-import paymentRoutes from './routes/payments';
-import razorpayRoutes from './routes/razorpay';
 import adminRoutes from './routes/admin';
 import privacyRoutes from './routes/privacy';
 import contactRoutes from './routes/contact';
 import wishlistRoutes from './routes/wishlist';
 import reviewRoutes from './routes/reviews';
 import analyticsRoutes from './routes/analytics';
+import systemRoutes from './routes/system';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import { securityHeaders, securityLogger, adminRateLimit } from './middleware/security';
+import { startOrderExpiryJob } from './jobs/orderExpiryJob';
+import prisma from './utils/prisma';
 
 // Load environment variables
 
@@ -44,6 +44,7 @@ app.use(cors({
     'http://localhost:8081',
     'http://localhost:8080',
     'http://localhost:3000',
+    'http://localhost:3002',
     process.env.CORS_ORIGIN || 'http://localhost:5173'
   ],
   credentials: true,
@@ -67,20 +68,40 @@ app.use('/api/products', productRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/addresses', addressRoutes);
-app.use('/api/payments', paymentRoutes);
-app.use('/api/payments', razorpayRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/privacy', privacyRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/admin/system', systemRoutes);
 
 // Error handling middleware
 app.use(notFound);
 app.use(errorHandler);
 
-app.listen(PORT, () => {
+// Function to check database connection
+async function checkDatabaseConnection() {
+    try {
+        await prisma.$queryRaw`SELECT 1`;
+        console.log('✅ Database connection established');
+        return true;
+    } catch (error) {
+        console.error('❌ Database connection failed:', error);
+        return false;
+    }
+}
+
+app.listen(PORT, async () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+  
+  // Check database connection first
+  const dbConnected = await checkDatabaseConnection();
+  if (dbConnected) {
+    // Start background jobs only after database is connected
+    startOrderExpiryJob();
+  } else {
+    console.log('⚠️ Background jobs will start when database connection is established');
+  }
 });

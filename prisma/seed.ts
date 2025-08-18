@@ -229,6 +229,11 @@ async function main() {
   console.log('🌱 Starting database seed...');
 
   // Clear existing data
+  await prisma.refund.deleteMany();
+  await prisma.payment.deleteMany();
+  await prisma.orderItem.deleteMany();
+  await prisma.order.deleteMany();
+  await prisma.revenueReport.deleteMany();
   await prisma.orderItem.deleteMany();
   await prisma.order.deleteMany();
   await prisma.cartItem.deleteMany();
@@ -296,10 +301,110 @@ async function main() {
     }
   }
 
+  // Create demo orders and payments
+  console.log('🧾 Creating demo orders and payments...');
+  const seededProducts = await prisma.product.findMany({ take: 3, orderBy: { createdAt: 'asc' } });
+  if (seededProducts.length >= 2) {
+    // Order 1 for demo user
+    const order1Total = Number(seededProducts[0].price) * 1 + Number(seededProducts[1].price) * 2;
+    const order1 = await prisma.order.create({
+      data: {
+        orderNumber: 'ORD-SEED-001',
+        userId: demoUser.id,
+        status: 'CONFIRMED',
+        total: order1Total,
+        shippingCost: 0,
+        tax: 0,
+        shippingFirstName: demoUser.firstName || 'Demo',
+        shippingLastName: demoUser.lastName || 'User',
+        shippingAddress: '123 Demo Street',
+        shippingCity: 'Mumbai',
+        shippingState: 'MH',
+        shippingZipCode: '400001',
+        shippingCountry: 'India',
+        items: {
+          create: [
+            {
+              productId: seededProducts[0].id,
+              quantity: 1,
+              price: Number(seededProducts[0].price)
+            },
+            {
+              productId: seededProducts[1].id,
+              quantity: 2,
+              price: Number(seededProducts[1].price)
+            }
+          ]
+        }
+      }
+    });
+
+    await prisma.payment.create({
+      data: {
+        orderId: order1.id,
+        status: 'COMPLETED',
+        amount: order1Total,
+        currency: 'INR',
+        paymentMethod: 'CARD',
+        gatewayProvider: 'razorpay',
+        gatewayFee: 49.99,
+        netAmount: order1Total - 49.99,
+        transactionId: `TXN-${order1.id.slice(-6).toUpperCase()}`,
+        paidAt: new Date(),
+      }
+    });
+
+    // Order 2 for admin user
+    const basePrice = Number(seededProducts[0].price);
+    const order2Total = basePrice * 1;
+    const order2 = await prisma.order.create({
+      data: {
+        orderNumber: 'ORD-SEED-002',
+        userId: adminUser.id,
+        status: 'CONFIRMED',
+        total: order2Total,
+        shippingCost: 0,
+        tax: 0,
+        shippingFirstName: adminUser.firstName || 'Admin',
+        shippingLastName: adminUser.lastName || 'User',
+        shippingAddress: '456 Admin Avenue',
+        shippingCity: 'Bengaluru',
+        shippingState: 'KA',
+        shippingZipCode: '560001',
+        shippingCountry: 'India',
+        items: {
+          create: [
+            {
+              productId: seededProducts[0].id,
+              quantity: 1,
+              price: basePrice
+            }
+          ]
+        }
+      }
+    });
+
+    await prisma.payment.create({
+      data: {
+        orderId: order2.id,
+        status: 'COMPLETED',
+        amount: order2Total,
+        currency: 'INR',
+        paymentMethod: 'UPI',
+        gatewayProvider: 'razorpay',
+        gatewayFee: 19.99,
+        netAmount: order2Total - 19.99,
+        transactionId: `TXN-${order2.id.slice(-6).toUpperCase()}`,
+        paidAt: new Date(),
+      }
+    });
+  }
+
   console.log('✅ Database seeded successfully!');
-  console.log(`� Created 2 users (1 admin, 1 demo)`);
-  console.log(`�📦 Created ${categories.length} categories`);
+  console.log(`👥 Created 2 users (1 admin, 1 demo)`);
+  console.log(`📦 Created ${categories.length} categories`);
   console.log(`🏋️ Created ${products.length} products`);
+  console.log('🧾 Created 2 demo orders and payments');
 }
 
 main()
