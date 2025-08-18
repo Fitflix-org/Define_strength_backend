@@ -92,20 +92,26 @@ router.post('/send', async (req: Request, res: Response) => {
     try {
       if (process.env.GOOGLE_SHEETS_ENABLED === 'true') {
         const sheetData = [
-          new Date().toISOString(),
-          contactMessage.id,
-          name,
-          email,
-          phone || '',
-          category,
-          subject,
-          message.substring(0, 200) + (message.length > 200 ? '...' : ''),
-          'NEW',
-          'MEDIUM'
+          [
+            new Date().toISOString(),
+            contactMessage.id,
+            name,
+            email,
+            phone || '',
+            category,
+            subject,
+            message.substring(0, 200) + (message.length > 200 ? '...' : ''),
+            'NEW',
+            'MEDIUM'
+          ]
         ];
         
-        const response = await appendToSheet('Contact Messages', sheetData);
-        googleSheetsRef = `Sheet_Row_${response?.spreadsheetId || 'unknown'}_${Date.now()}`;
+        const response = await appendToSheet({
+          spreadsheetId: process.env.GOOGLE_SHEET_ID || '',
+          range: 'Contact Messages!A:J',
+          values: sheetData
+        });
+        googleSheetsRef = `Sheet_Row_${Date.now()}`;
         
         // Update the contact message with Google Sheets reference
         await prisma.contactMessage.update({

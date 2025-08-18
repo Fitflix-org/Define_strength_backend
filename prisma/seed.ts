@@ -342,6 +342,7 @@ async function main() {
     await prisma.payment.create({
       data: {
         orderId: order1.id,
+        userId: demoUser.id,
         status: 'COMPLETED',
         amount: order1Total,
         currency: 'INR',
@@ -387,6 +388,7 @@ async function main() {
     await prisma.payment.create({
       data: {
         orderId: order2.id,
+        userId: adminUser.id,
         status: 'COMPLETED',
         amount: order2Total,
         currency: 'INR',

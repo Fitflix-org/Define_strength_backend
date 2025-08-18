@@ -27,6 +27,7 @@ model User {
   addresses Address[]
   wishlists Wishlist[]
   reviews   ProductReview[]
+  payments  Payment[]
 
   @@map("users")
 }
@@ -146,6 +147,10 @@ model Order {
   shippingCountry   String
   shippingPhone     String?
   
+  // Additional fields
+  trackingNumber    String?
+  notes             String?
+  
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -160,6 +165,7 @@ model Order {
 model Payment {
   id                String        @id @default(cuid())
   orderId           String
+  userId            String        // Add userId field
   status            PaymentStatus @default(PENDING)
   amount            Decimal       @db.Decimal(10, 2)
   currency          String        @default("INR")
@@ -188,11 +194,15 @@ model Payment {
   refundedAt        DateTime?
   failureReason     String?
   
+  // Additional fields
+  metadata          Json?         // For storing additional data like retry attempts
+  
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
   order   Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user    User      @relation(fields: [userId], references: [id])
   refunds Refund[]
 
   @@map("payments")
@@ -268,6 +278,9 @@ enum OrderStatus {
   PENDING
   PAYMENT_INITIATED
   CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
   FAILED
   CANCELLED
 }
@@ -299,10 +312,31 @@ model ContactMessage {
   message   String
   category  String   @default("general") // general, order, payment, product, technical, complaint
   status    String   @default("NEW") // NEW, IN_PROGRESS, RESOLVED, CLOSED
+  priority  String   @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  assignedTo String? // Admin user assigned to handle this message
+  googleSheetsRef String? // Reference to Google Sheets row
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Relations
+  replies   ContactReply[]
+
   @@map("contact_messages")
+}
+
+model ContactReply {
+  id                String   @id @default(cuid())
+  contactMessageId  String
+  adminUserId       String
+  message           String
+  isInternal        Boolean  @default(false) // Internal note vs customer reply
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  contactMessage    ContactMessage @relation(fields: [contactMessageId], references: [id], onDelete: Cascade)
+
+  @@map("contact_replies")
 }
 
 model NewsletterSubscription {

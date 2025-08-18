@@ -747,12 +747,7 @@ router.get('/contact-messages', adminAuth, async (req: AdminRequest, res) => {
         where,
         skip,
         take: Number(limit),
-        orderBy: { createdAt: 'desc' },
-        include: {
-          replies: {
-            orderBy: { createdAt: 'asc' }
-          }
-        }
+        orderBy: { createdAt: 'desc' }
       }),
       prisma.contactMessage.count({ where })
     ]);
@@ -786,12 +781,7 @@ router.patch('/contact-messages/:messageId/status', adminAuth, async (req: Admin
 
     const message = await prisma.contactMessage.update({
       where: { id: messageId },
-      data: { status },
-      include: {
-        replies: {
-          orderBy: { createdAt: 'asc' }
-        }
-      }
+      data: { status }
     });
 
     res.json({
@@ -877,8 +867,7 @@ router.post('/contact-messages/:messageId/reply', adminAuth, async (req: AdminRe
     const reply = await prisma.contactReply.create({
       data: {
         contactMessageId: messageId,
-        adminId: req.userId!,
-        adminName,
+        adminUserId: req.userId!,
         message: replyMessage
       }
     });
